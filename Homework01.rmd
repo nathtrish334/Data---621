@@ -1,0 +1,335 @@
+---
+title: "Data 621 Hw01"
+author: "Trishita Nath"
+date: "9/27/2021"
+output: html_document
+---
+```{r message=FALSE, warning=FALSE, include=FALSE}
+library(tidyverse)
+library(knitr)
+library(psych)
+library(readr)
+library(kableExtra)
+library(ggiraph)
+library(cowplot)
+library(reshape2)
+library(corrgram)
+library(gridExtra)
+library(usdm)
+library(mice)
+
+training_data <- read_csv("https://raw.githubusercontent.com/nathtrish334/Data-621/main/moneyball-training-data.csv")
+
+evaluation_data <- read_csv("https://raw.githubusercontent.com/nathtrish334/Data-621/main/moneyball-evaluation-data.csv")
+```
+
+## Overview
+In this homework assignment, you will explore, analyze and model a data set containing approximately 2200 records. Each record represents a professional baseball team from the years 1871 to 2006 inclusive. Each record has the performance of the team for the given year, with all of the statistics adjusted to match the performance of a 162 game season.
+
+Your objective is to build a multiple linear regression model on the training data to predict the number of wins for the team. You can only use the variables given to you (or variables that you derive from the variables provided). Below is a short description of the variables of interest in the data set:
+
+
+
+
+## Data Exploration
+
+The dataset consists of 17 elements, with 2276 total cases.  Out of those 17, 15 are explanatory variables, which can be broken down into four groups:
+
+- batting
+- baserun
+- fielding
+- pitching
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+mbd1 <- describe(training_data, na.rm = F)
+
+mbd1$na_count <- sapply(training_data, function(y) sum(length(which(is.na(y)))))
+mbd1 <- mbd1[-1,]
+
+
+kable(mbd1, "html", escape = F) %>%
+  kable_styling("striped", full_width = T) %>%
+  column_spec(1, bold = T) %>%
+  scroll_box(width = "100%", height = "700px")
+```
+
+
+Looking at the data above, there are multiple variables with missing (NA) values, with **TEAM-BATTING_HBP** being the highest.
+
+
+The boxplots below shows the spread of data within the dataset, and show various outliers. The variable, **TEAM_PITCHING_H** seems to have the highest spread with the most outliers. 
+
+```{r echo=FALSE}
+ggplot(stack(training_data), aes(x = ind, y = values)) + 
+  geom_boxplot() +
+  theme(legend.position="none") +
+  theme(axis.text.x=element_text(angle=45, hjust=1)) + 
+  theme(panel.background = element_rect(fill = '#d0ddf2'))
+```
+
+
+The graph below zooms into the other variables, so it becomes easier to see spread and outliers from the other variables.
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+ggplot(stack(training_data), aes(x = ind, y = values)) + 
+  geom_boxplot() +
+  coord_cartesian(ylim = c(0, 800)) +
+  theme(legend.position="none") +
+  theme(axis.text.x=element_text(angle=45, hjust=1)) + 
+  theme(panel.background = element_rect(fill = '#d0ddf2'))
+```
+
+In the Histograms below, the data shows multiple graphs with right skews while only a few have left-skew.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+mb_hist <- training_data
+mb_hist <- mb_hist[,-1 ]
+
+mb_hist %>%
+  keep(is.numeric) %>%                     
+  gather() %>%                             
+  ggplot(aes(value)) +                     
+    facet_wrap(~ key, scales = "free") +  
+    geom_histogram(bins = 35)                 
+```
+
+The above boxplots show all of the variables listed in the dataset.  This visualization may assist in showing how the data is spread.
+
+
+
+The correlation plot below shows how variables in the dataset are related to each other.  Looking at the plot, we can see that certain variables are more related than others. 
+
+
+For this project, it makes sense to break down the correlation by wins - since that's what we're trying to predict.
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+kable(cor(drop_na(mb_hist))[,1], "html", escape = F) %>%
+  kable_styling("striped", full_width = F) %>%
+  column_spec(1, bold = T) %>%
+  scroll_box(height = "500px")
+```
+
+
+Below is a visual representation of the correlation plot.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+corrgram(drop_na(mb_hist), order=TRUE,
+         upper.panel=panel.cor, main="Moneyball")
+```
+
+According to the coorelation graph, batting_h, batting_2b, batting_hr, batting_bb, pitching_h, pitching_hr, and pitching_bb are the most positively correlated. 
+
+## Data Preparation
+
+### Removal of Data
+
+The variable TEAM_BATTING_HBP is also missing over 90% of its values.  That variable will be removed completely.
+
+TEAM_PITCHING_HR and TEAM_BATTING_HR are also very closely correlated with each other. The TEAM_PITCHING_HR variable will be dropped from the dataset
+
+Using the vifstep function variables determined to have collinearity issues will be discarded.  
+
+
+### Imputation of Missing (NA) values
+
+We can  handle missing values in a number of: deleting the observations, deleting the variables, imputation with the mean/median/mode, or imputation with a prediction.
+
+Imputation is the easy way, however it reduces the variance in the dataset and shrinks standard errors - which can invalidate hypothesis tests.
+
+For this case, I will imputate data via prediction using the MICE (Multivariate Imputation) library using a random forest prediction method. 
+
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+mbd2 <- training_data
+mbd2 <- mbd2[,-c(1, 11, 13)]
+```
+
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+
+init = mice(mbd2, maxit=0) 
+meth = init$method
+predM = init$predictorMatrix
+
+predM[, c("TARGET_WINS")]=0
+
+imputed = mice(mbd2, method="rf", predictorMatrix=predM, m=5)
+
+imputed <- complete(imputed)
+```
+
+Variables that exceed the established threshold will be discarded to avoid collinearity issues.
+
+```{r}
+vif(imputed)
+v1 <- vifstep(imputed, th=10)
+```
+
+
+### Output - The below table shows the results of above data manipulation. 
+
+The NA data has been iputed using the MICE prediction, using the Random Forest Method.  Variables with collinearity as established by the vir/virstep package have been dropped.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+imputedtable <- describe(imputed)
+
+kable(imputedtable, "html", escape = F) %>%
+  kable_styling("striped", full_width = T) %>%
+  column_spec(1, bold = T) %>%
+  scroll_box(width = "100%", height = "700px")
+```
+
+
+
+
+
+
+
+## Build Models
+
+From the training data provided, I will build 3 different linear regression models, to determine which will provide the best prediction for the number of wins for a baseball team.  The tree approachs are: all variables, only significant variables, and backwards elimination of each variable.
+
+
+### Model 1: All Variables
+
+After the data has been manipulated, all of the variables will be tested to determine the base model they provided.  This will allow us to see which variables are significant in our dataset, and allow us to make other models based on that.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+model1 <- lm(TARGET_WINS ~., imputed)
+
+(summary(model1))
+summodel1 <- summary(model1)
+```
+
+
+### Model 2: Highly Significant Variables Only
+
+This model focusses only on the variables that are statistically significant - in order to see if only those variables allow for a better model.  Variables will be chosen based on their significance level from the R output.
+
+```{r echo=FALSE}
+model2 <- lm(TARGET_WINS ~ TEAM_BATTING_H  + TEAM_BATTING_3B  + TEAM_BATTING_HR  + TEAM_BATTING_SO + TEAM_BASERUN_SB + TEAM_PITCHING_SO + TEAM_FIELDING_E + TEAM_FIELDING_DP, imputed)
+
+summary(model2)
+summodel2 <- summary(model2)
+```  
+
+### Model 3:  Backwards Elimination and Significance  
+
+Variables are removed one by one to determine best fit model.  After each variable is removed, the model re-run - until the most optimal output (r2, f-stat) are produced.  Only the final output will be shown. .
+
+```{r echo=FALSE}
+model4 <- lm(TARGET_WINS ~ TEAM_BATTING_H + TEAM_BASERUN_SB  + TEAM_FIELDING_E  + TEAM_BATTING_HR, imputed)
+
+summary(model4)
+summodel4 <- summary(model4)
+```
+
+## Select Models
+
+From the three models, I decided to use model 3 for the predictions.  While the first model had the highest R-squared, it had multiple variables that weren't statistically significant, and some that had multicollinearity issues.  The F-statistic in model 3 is also much higher than the other two.
+
+
+```{r include=FALSE}
+RSS <- c(crossprod(model1$residuals))
+MSE <- RSS/length(model1$residuals)
+
+m1mse <- print(paste0("Mean Squared Error: ", MSE))
+m1root <- print(paste0("Root MSE: ", sqrt(MSE)))
+m1ar <- print(paste0("Adjusted R-squared: ", summodel1$adj.r.squared))
+m1fs <- print(paste0("F-statistic: ",summodel1$fstatistic[1]))
+```
+
+```{r include=FALSE}
+RSS <- c(crossprod(model2$residuals))
+MSE <- RSS/length(model2$residuals)
+
+m2mse <- print(paste0("Mean Squared Error: ", MSE))
+m2root <- print(paste0("Root MSE: ", sqrt(MSE)))
+m2ar <- print(paste0("Adjusted R-squared: ", summodel2$adj.r.squared))
+m2fs <- print(paste0("F-statistic: ",summodel2$fstatistic[1]))
+```
+
+```{r include=FALSE}
+RSS <- c(crossprod(model4$residuals))
+MSE <- RSS/length(model4$residuals)
+
+m3mse <- print(paste0("Mean Squared Error: ", MSE))
+m3root <- print(paste0("Root MSE: ", sqrt(MSE)))
+m3ar <- print(paste0("Adjusted R-squared: ", summodel4$adj.r.squared))
+m3fs <- print(paste0("F-statistic: ",summodel4$fstatistic[1]))
+```
+
+A comparsion of the multiple linear regression models, based on: mean square error, R2, F-stat, and root MSE.
+
+```{r echo=FALSE}
+compare_model1 <- c(m1mse, m1root, m1ar, m1fs )
+compare_model2 <- c(m2mse, m2root, m2ar, m2fs )
+compare_model3 <- c(m3mse, m3root, m3ar, m3fs )
+
+compare <- data.frame(compare_model1, compare_model2, compare_model3)
+colnames(compare) <- c("Model 1", "Model 2", "Model 3")
+
+kable(compare)
+```
+
+#### Predictions
+
+The evaulation data also needs some prep work. The evaluation data has had columns removed, and NA values imputed using the MICE - Random Forest method to predict what the NA values could be.
+
+```{r include=FALSE}
+evaluation_data <- evaluation_data[,-c(1, 10, 12)]
+```
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+init = mice(evaluation_data, maxit=0) 
+meth = init$method
+predM = init$predictorMatrix
+
+
+imputed1 = mice(evaluation_data, method="rf", predictorMatrix=predM, m=5)
+
+imputed1 <- complete(imputed1)
+```
+
+```{r echo=FALSE}
+imputedtable1 <- describe(imputed1)
+
+kable(imputedtable1, "html", escape = F) %>%
+  kable_styling("striped", full_width = T) %>%
+  column_spec(1, bold = T) %>%
+  scroll_box(width = "100%", height = "700px")
+```
+
+The following are the predicted values for the test set of the data after imputing and cleaning the data, using the predict function and Model 3:
+
+```{r echo=FALSE}
+predict1 <- predict(model4, newdata = imputed1, interval="prediction")
+kable(predict1, "html", escape = F) %>%
+  kable_styling("striped", full_width = F) %>%
+  column_spec(1, bold = T) %>%
+  scroll_box(width = "100%", height = "700px")
+
+
+summary(predict1)
+```
+
+
+```{r echo=FALSE}
+x <- model.matrix(model4)
+x0 <- apply(x, 2, median)
+
+predict(model4, new=data.frame(t(x0)))
+predict(model4,new=data.frame(t(x0)),interval="prediction")
+
+```
+
+```{r eval=FALSE, include=FALSE}
+lmMod <- lm(imputed$TARGET_WINS ~., data = imputed)
+selectedMod <- step(lmMod)
+summary(selectedMod)
+all_vifs <- car::vif(selectedMod)
+print(all_vifs)
+```
