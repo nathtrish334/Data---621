@@ -1,0 +1,320 @@
+---
+title: "Data 621 Homework 04"
+author: "Trishita Nath"
+date: "11/23/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Overview #  
+
+In this homework assignment, you will explore, analyze and model a dataset containing approximately 8000 records representing  a  customer  at  an  auto  insurance  company. Each  record  has  two response variables.  The first responsevariable, TARGET_FLAG, is a 1 or a 0. A “1” means that the person was in a car crash. A zero means that the person was not in a car crash.The second responsevariable is TARGET_AMT. This value is zero if the person did not crash their car. But if they did crash their car, this number will be a value greater than zero.
+<br>
+Your objective is to build multiple linear regression and binary logistic regression models on the training data to predict the probability that a person will crash their car and also the amount of money it will cost if the person does crash their car. You can only use the variables given to you (or variables that you derive from the variables provided). 
+<br>
+
+```{r, message = FALSE, warning = FALSE, echo=FALSE}
+# loading libraries
+library(tidyverse)
+library(kableExtra)
+library(knitr)
+library(ggcorrplot)
+library(car)
+library(MASS)
+library(dplyr)
+library(ggplot2)
+library(caret)
+library(pROC)
+library(pscl)
+library(psych)
+library(data.table)
+library(stringr)
+library(mice)
+library(Amelia)
+library(gridExtra)
+library(corrgram)
+library(Hmisc)
+library(corrplot)
+library(RColorBrewer)
+library(glmulti)
+
+library(ggthemes)
+library(ggpubr)
+library(car)
+library(caret)
+```
+
+
+```{r, message=FALSE, warning=FALSE, echo=FALSE}
+# Read both training and test datasets
+evaluation_data <- read.csv('https://raw.githubusercontent.com/nathtrish334/Data-621/main/HW4/insurance-evaluation-data.csv', stringsAsFactors = FALSE)
+training_data <- read.csv('https://raw.githubusercontent.com/nathtrish334/Data-621/main/HW4/insurance_training_data.csv', stringsAsFactors = FALSE)
+```
+
+# 1. DATA EXPLORATION
+
+```{r, message = FALSE, warning = FALSE, echo = F}
+dim1 <- dim(training_data)
+print(paste0('Training dataset dimensions:   ', 'Number of rows: ', dim1[1], ', ', 'Number of cols: ', dim1[2]))
+# Show records
+head(training_data)
+#Structure of the dataset
+str(training_data)
+```
+
+The training dataset consists of 26 variables and 8161 observations
+
+```{r message=FALSE, warning=FALSE, echo=FALSE}
+# change data type of some variables for visualization
+insurance_train_dist <- training_data %>% 
+  dplyr::select(-INDEX) %>% 
+  mutate(TARGET_FLAG = as.factor(TARGET_FLAG),
+         KIDSDRIV = as.factor(KIDSDRIV),
+         HOMEKIDS = as.factor(HOMEKIDS),
+         PARENT1 = as.factor(PARENT1),
+         CLM_FREQ = as.factor(CLM_FREQ),
+         INCOME = str_replace_all(INCOME, "[\\$,]", ""),
+         HOME_VAL = str_replace_all(HOME_VAL, "[\\$,]", ""),
+         BLUEBOOK = str_replace_all(BLUEBOOK, "[\\$,]", ""),
+         OLDCLAIM = str_replace_all(OLDCLAIM, "[\\$,]", ""),
+         OLDCLAIM = as.integer(OLDCLAIM),
+         BLUEBOOK = as.integer(BLUEBOOK),
+         HOME_VAL = as.integer(HOME_VAL),
+         INCOME = as.integer(INCOME))
+
+# distribution of discrete variables
+kidsdriv <- insurance_train_dist %>% 
+  ggplot(aes(KIDSDRIV)) +
+  geom_bar(aes(fill = TARGET_FLAG), position = position_dodge())
+
+homekids <- insurance_train_dist %>% 
+  ggplot(aes(HOMEKIDS)) +
+  geom_bar(aes(fill = TARGET_FLAG), position = position_dodge())
+
+parent1 <- insurance_train_dist %>% 
+  ggplot(aes(PARENT1)) +
+  geom_bar(aes(fill = TARGET_FLAG), position = position_dodge()) 
+
+mstatus <- insurance_train_dist %>% 
+  ggplot(aes(MSTATUS)) +
+  geom_bar(aes(fill = TARGET_FLAG), position = position_dodge())
+
+sex <- insurance_train_dist %>% 
+  ggplot(aes(SEX)) +
+  geom_bar(aes(fill = TARGET_FLAG), position = position_dodge())
+
+education <- insurance_train_dist %>% 
+  ggplot(aes(EDUCATION)) +
+  geom_bar(aes(fill = TARGET_FLAG), position = position_dodge())
+
+job <- insurance_train_dist %>% 
+  ggplot(aes(JOB)) +
+  geom_bar(aes(fill = TARGET_FLAG), position = position_dodge()) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+car_use <- insurance_train_dist %>% 
+  ggplot(aes(CAR_USE)) +
+  geom_bar(aes(fill = TARGET_FLAG), position = position_dodge())
+
+car_type <- insurance_train_dist %>% 
+  ggplot(aes(CAR_TYPE)) +
+  geom_bar(aes(fill = TARGET_FLAG), position = position_dodge()) 
+
+red_car <- insurance_train_dist %>% 
+  ggplot(aes(RED_CAR)) +
+  geom_bar(aes(fill = TARGET_FLAG), position = position_dodge())
+
+revoked <- insurance_train_dist %>% 
+  ggplot(aes(REVOKED)) +
+  geom_bar(aes(fill = TARGET_FLAG), position = position_dodge())
+
+urbancity <- insurance_train_dist %>% 
+  ggplot(aes(URBANICITY)) +
+  geom_bar(aes(fill = TARGET_FLAG), position = position_dodge()) 
+
+clm_freq <- insurance_train_dist %>% 
+  ggplot(aes(CLM_FREQ)) +
+  geom_bar(aes(fill = TARGET_FLAG), position = position_dodge())
+
+ggarrange(kidsdriv + rremove("legend"), homekids + rremove("legend"), parent1 + rremove("legend"), mstatus + rremove("legend"), sex + rremove("legend"), education + rremove("legend"), job + rremove("legend"), car_use + rremove("legend"), car_type + rremove("legend"), red_car + rremove("legend"), revoked + rremove("legend"), urbancity + rremove("legend"), clm_freq + rremove("legend"), ncol = 2, nrow = 7)
+# change data type of some variables for visualization
+distribution <- insurance_train_dist %>% 
+  dplyr::select(c("TARGET_FLAG", "AGE", "YOJ", "INCOME", "HOME_VAL", "TRAVTIME", "BLUEBOOK", "TIF", "OLDCLAIM", "MVR_PTS", "CAR_AGE")) %>% 
+  gather(key, value, -TARGET_FLAG) %>% 
+  mutate(value = as.integer(value),
+         key = as.factor(key),
+         TARGET_FLAG = as.factor(TARGET_FLAG))
+
+# histogram of continous variables
+distribution %>% 
+  ggplot(aes(value)) +
+  facet_wrap(~key, scale = "free",  ncol = 3) +
+  geom_histogram(binwidth = function(x) 2 * IQR(x) / (length(x)^(1/3)), fill="#56B4E9") +
+  theme_minimal()
+# boxplot of continous variables
+distribution %>% 
+  ggplot(aes(x = key, y = value)) +
+  geom_boxplot(aes(fill = TARGET_FLAG)) +
+  facet_wrap(~ key, scales = 'free', ncol = 3) +
+  scale_fill_manual(values=c("#999999", "#E69F00")) +
+  theme_minimal()
+# change all variable's data type for correlation
+correlated_data <- data.frame(lapply(insurance_train_dist, function(x) as.numeric(as.factor(x))))
+
+# top correlated variables
+a <- sort(cor(dplyr::select(correlated_data, TARGET_FLAG, everything()))[,1], decreasing = T)
+b <- sort(cor(dplyr::select(correlated_data, TARGET_AMT, everything()))[,1], decreasing = T)
+kable(cbind(a, b), col.names = c("TARGET_FLAG", "TARGET_AMT")) %>% 
+  kable_styling(full_width = F) %>% 
+  add_header_above(c(" ", "Correlation" = 2))
+
+# correlation plot
+corrplot(cor(dplyr::select(drop_na(correlated_data), everything())), 
+         method = "number", 
+         type = "lower",
+         col = brewer.pal(n = 26, name = "Paired"),
+         number.cex = .7, tl.cex = .7,
+         tl.col = "black", tl.srt = 45)
+```
+
+
+# 2. DATA PREPARATION
+
+```{r, message = FALSE, warning = FALSE, echo = F}
+# Imputating train data
+init <- mice(insurance_train_dist)
+meth <- init$method
+predM <- init$predictorMatrix
+predM[, c("TARGET_FLAG", "TARGET_AMT")] <- 0 #this removes the variable as a predictor but still will be imputed
+insurance_impute <- mice(insurance_train_dist, method = 'rf', predictorMatrix=predM)
+insurance_imputed <- complete(insurance_impute)
+print(paste0("Missing value after imputation: ", sum(is.na(insurance_imputed))))
+
+# preparing evaluation data
+evaluation_data <- evaluation_data %>% 
+  dplyr::select(-c(TARGET_FLAG, TARGET_AMT, INDEX)) %>% 
+  mutate(KIDSDRIV = as.factor(KIDSDRIV),
+         HOMEKIDS = as.factor(HOMEKIDS),
+         PARENT1 = as.factor(PARENT1),
+         CLM_FREQ = as.factor(CLM_FREQ),
+         INCOME = str_replace_all(INCOME, "[\\$,]", ""),
+         HOME_VAL = str_replace_all(HOME_VAL, "[\\$,]", ""),
+         BLUEBOOK = str_replace_all(BLUEBOOK, "[\\$,]", ""),
+         OLDCLAIM = str_replace_all(OLDCLAIM, "[\\$,]", ""),
+         OLDCLAIM = as.integer(OLDCLAIM),
+         BLUEBOOK = as.integer(BLUEBOOK),
+         HOME_VAL = as.integer(HOME_VAL),
+         INCOME = as.integer(INCOME))
+
+# imputating evaluation data
+init <- mice(evaluation_data)
+meth <- init$method
+predM <- init$predictorMatrix
+insurance_eval_impute <- mice(evaluation_data, method = 'rf', predictorMatrix=predM)
+insurance_eval_imputed <- complete(insurance_eval_impute)
+insurance_eval_imputed <- data.frame(lapply(insurance_eval_imputed, function(x) as.numeric(as.factor(x))))
+print(paste0("Missing value after imputation: ", sum(is.na(insurance_eval_imputed))))
+# check for multicollinearity
+vif_data <- data.frame(lapply(insurance_imputed, function(x) as.numeric(as.factor(x))))
+kable((car::vif(glm(TARGET_FLAG ~. , data = vif_data))), col.names = c("VIF Score")) %>%  #remove tax for high vif score
+  kable_styling(full_width = F)
+```
+
+# 3. BUILD MODELS
+
+```{r, message = FALSE, warning = FALSE, echo = F}
+# original value model
+correlated_data <- dplyr::select(correlated_data, -"TARGET_FLAG")
+model1 <- lm(TARGET_AMT ~ ., correlated_data)
+summary(model1)
+# imputed model
+vif_data <- dplyr::select(vif_data, -"TARGET_FLAG")
+model2 <- lm(TARGET_AMT ~ ., vif_data)
+summary(model2)
+# stepwise transformed model
+model3 <- stepAIC(model2, direction = "both", trace = FALSE)
+summary(model3)
+# boxcox transformation model
+insurance_boxcox <- preProcess(vif_data, c("BoxCox"))
+boxcoxed_data <- predict(insurance_boxcox, vif_data)
+model4 <- lm(TARGET_AMT ~ ., boxcoxed_data)
+summary(model4)
+# original value model
+binomial_data <- data.frame(lapply(insurance_imputed, function(x) as.numeric(as.factor(x)))) %>% 
+  mutate(TARGET_FLAG = as.factor(TARGET_FLAG)) %>% 
+  dplyr::select(-"TARGET_AMT")
+  
+model5 <- glm(TARGET_FLAG ~ ., family = "binomial", binomial_data)
+summary(model5)
+# stepwise transformed model
+model6 <- stepAIC(model5, direction = "both", trace = FALSE)
+summary(model6)
+# boxcox transformation model
+insurance_boxcox1 <- preProcess(binomial_data, c("BoxCox"))
+in_bc_transformed1 <- predict(insurance_boxcox1, binomial_data)
+model7 <- glm(TARGET_FLAG ~ ., family = "binomial", in_bc_transformed1)
+summary(model7)
+# comparing all binary logistic models using various measures
+c1 <- confusionMatrix(as.factor(as.integer(fitted(model5) > .5)), as.factor(model5$y), positive = "1")
+c2 <- confusionMatrix(as.factor(as.integer(fitted(model6) > .5)), as.factor(model6$y), positive = "1")
+c3 <- confusionMatrix(as.factor(as.integer(fitted(model7) > .5)), as.factor(model7$y), positive = "1")
+
+roc1 <- roc(binomial_data$TARGET_FLAG,  predict(model5, binomial_data, interval = "prediction"))
+roc2 <- roc(binomial_data$TARGET_FLAG,  predict(model6, binomial_data, interval = "prediction"))
+roc3 <- roc(binomial_data$TARGET_FLAG,  predict(model7, binomial_data, interval = "prediction"))
+
+metrics1 <- c(c1$overall[1], "Class. Error Rate" = 1 - as.numeric(c1$overall[1]), c1$byClass[c(1, 2, 5, 7)], AUC = roc1$auc)
+metrics2 <- c(c2$overall[1], "Class. Error Rate" = 1 - as.numeric(c2$overall[1]), c2$byClass[c(1, 2, 5, 7)], AUC = roc2$auc)
+metrics3 <- c(c3$overall[1], "Class. Error Rate" = 1 - as.numeric(c3$overall[1]), c3$byClass[c(1, 2, 5, 7)], AUC = roc3$auc)
+```
+
+# 4. SELECT MODELS
+
+```{r, message = FALSE, warning = FALSE, echo = F}
+# Multiple Linear Regression
+
+# ROC curve of model 3
+plot(roc(binomial_data$TARGET_FLAG,  predict(model5, binomial_data, interval = "prediction")), print.auc = TRUE, main = "Model 5" )
+
+# predict
+predict <- predict(model5, insurance_eval_imputed, interval = "prediction")
+eval <- table(as.integer(predict > .5))
+print(paste(eval[1], "not in a car crash", "and", eval[2], "in a car crash"))
+# comparing all binary logistic models using various measures
+a1 <- mean((summary(model1))$residuals^2)
+a2 <- mean((summary(model2))$residuals^2)
+a3 <- mean((summary(model3))$residuals^2)
+a4 <- mean((summary(model4))$residuals^2)
+a5 <- rbind(a1, a2, a3, a4)
+ 
+b1 <- summary(model2)$r.squared
+b2 <- summary(model3)$r.squared
+b3 <- summary(model1)$r.squared
+b4 <- summary(model4)$r.squared
+b5 <- rbind(b1, b2, b3, b4)
+
+c1 <- summary(model1)$fstatistic
+c2 <- summary(model2)$fstatistic
+c3 <- summary(model3)$fstatistic
+c4 <- summary(model4)$fstatistic
+c5 <- rbind(c1, c2, c3, c4)
+
+mlr_metrics <- data.frame(cbind(a5, b5, c5), row.names = c("Model 1", "Model 2", "Model 3", "Model 4"))
+colnames(mlr_metrics) <- c("MSE", "R-Squared", "value", "numdf", "dendf")
+kable(mlr_metrics) %>% 
+  kable_styling(full_width = T) %>% 
+  add_header_above(c(" ", " " = 2, "F-Statistic" = 3))
+
+# residual plot
+plot(model4)
+
+# prediction
+prediction <- predict(model4, insurance_eval_imputed, interval = "prediction")
+
+# Binary Logistic Regression
+kable(cbind(metrics1, metrics2, metrics3), col.names = c("Model 5", "Model 6", "Model 7"))  %>% 
+  kable_styling(full_width = T)
+```
